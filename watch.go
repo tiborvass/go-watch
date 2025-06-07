@@ -1,12 +1,10 @@
-package main
+package watch
 
 import (
 	"bufio"
 	"bytes"
-	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,20 +17,15 @@ import (
 	"golang.org/x/term"
 )
 
-const timeFormat = "Mon Jan _2 15:04:05 2006"
+const defaultTimeFormat = "Mon Jan _2 15:04:05 2006"
 
-func main() {
-	n := flag.Float64("n", 2, "seconds between updates")
-	flag.Parse()
-	interval := time.Duration(math.Round(*n * float64(time.Second)))
-	if flag.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-n seconds] command [args...]\n", os.Args[0])
-		os.Exit(2)
-	}
-	cmdArgs := flag.Args()
+type Watcher struct {
+	Interval   time.Duration
+	Hostname   *string
+	TimeFormat string
+}
 
-	hostname, _ := os.Hostname()
-
+func (w Watcher) Watch(cmdArgs ...string) {
 	// cbreak+noecho, keep ISIG (so Ctrl-C still works) ===
 	fd := uintptr(os.Stdin.Fd())
 	var oldState unix.Termios
@@ -57,8 +50,20 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
 
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(w.Interval)
 	defer ticker.Stop()
+
+	timeFormat := w.TimeFormat
+	if timeFormat == "" {
+		timeFormat = defaultTimeFormat
+	}
+
+	hostname := ""
+	if w.Hostname != nil {
+		hostname = *w.Hostname
+	} else {
+		hostname, _ = os.Hostname()
+	}
 
 	redraw := func() {
 		var buf bytes.Buffer
@@ -71,15 +76,17 @@ func main() {
 		}
 
 		headerLeft := fmt.Sprintf("Every %.1fs: %s",
-			interval.Truncate(time.Second/10).Seconds(),
+			w.Interval.Truncate(time.Second/10).Seconds(),
 			strings.Join(cmdArgs, " "),
 		)
-		headerRight := fmt.Sprintf("%s: %s", hostname, time.Now().Format(timeFormat))
+		headerRight := time.Now().Format(timeFormat)
+		if hostname != "" {
+			headerRight = fmt.Sprintf("%s: %s", hostname, headerRight)
+		}
 		x := width - len(headerLeft)
 		if x < 0 {
 			x = 0
 		}
-
 		fmt.Fprintf(&buf, "%s%*s\n\n", headerLeft, x, headerRight)
 
 		r, w, err := os.Pipe()
