@@ -2,7 +2,7 @@
 //
 // Example:
 //
-//	w := watcher.Watcher{Interval: 500 * time.Millisecond}
+//	w := watch.Watcher{Interval: 500 * time.Millisecond}
 //	w.Watch(ctx, "date", "-Ins")
 //	w.WatchShell(ctx, "date -Ins")
 package watch
