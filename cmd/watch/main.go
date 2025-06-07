@@ -12,6 +12,8 @@ import (
 
 func main() {
 	n := flag.Float64("n", 2, "seconds between updates")
+	t := flag.Bool("t", false, "no title in header")
+	x := flag.Bool("x", false, "execute via exec instead of `sh -c`")
 	flag.Parse()
 	interval := time.Duration(math.Round(*n * float64(time.Second)))
 	if flag.NArg() < 1 {
@@ -20,6 +22,6 @@ func main() {
 	}
 	cmdArgs := flag.Args()
 
-	w := watch.Watcher{Interval: interval}
+	w := watch.Watcher{Interval: interval, NoTitle: *t, Exec: *x}
 	w.Watch(cmdArgs...)
 }

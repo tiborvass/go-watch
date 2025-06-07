@@ -17,15 +17,44 @@ import (
 	"golang.org/x/term"
 )
 
-const defaultTimeFormat = "Mon Jan _2 15:04:05 2006"
+const (
+	DefaultTimeFormat = "Mon Jan _2 15:04:05 2006"
+	DefaultInterval   = 2 * time.Second
+)
 
+// Watcher allows to set options.
+// Zero values are the default.
 type Watcher struct {
-	Interval   time.Duration
-	Hostname   *string
+	// Interval represents the time interval between two loops of command execution.
+	// If left zero, it is set to DefaultInterval
+	Interval time.Duration
+	// If NoTitle is set, no title header is displayed
+	NoTitle bool
+	// If Exec is set, the commands are executed without an `sh -c` wrapper.
+	Exec bool
+	// Hostname is the hostname displayed in the header.
+	// If nil, it is set to os.Hostname()
+	Hostname *string
+	// TimeFormat is the format displayed in the header.
+	// If empty, it is set to DefaultTimeFormat.
 	TimeFormat string
 }
 
+// Watch executes the commands passed in cmdArgs in a loop honoring the options defined in Watcher.
 func (w Watcher) Watch(cmdArgs ...string) {
+	if w.Interval == 0 {
+		w.Interval = DefaultInterval
+	}
+	if w.TimeFormat == "" {
+		w.TimeFormat = DefaultTimeFormat
+	}
+	hostname := ""
+	if w.Hostname != nil {
+		hostname = *w.Hostname
+	} else {
+		hostname, _ = os.Hostname()
+	}
+
 	// cbreak+noecho, keep ISIG (so Ctrl-C still works) ===
 	fd := uintptr(os.Stdin.Fd())
 	var oldState unix.Termios
@@ -53,18 +82,6 @@ func (w Watcher) Watch(cmdArgs ...string) {
 	ticker := time.NewTicker(w.Interval)
 	defer ticker.Stop()
 
-	timeFormat := w.TimeFormat
-	if timeFormat == "" {
-		timeFormat = defaultTimeFormat
-	}
-
-	hostname := ""
-	if w.Hostname != nil {
-		hostname = *w.Hostname
-	} else {
-		hostname, _ = os.Hostname()
-	}
-
 	redraw := func() {
 		var buf bytes.Buffer
 		// Clear screen & home
@@ -75,39 +92,47 @@ func (w Watcher) Watch(cmdArgs ...string) {
 			width, height = 80, 24
 		}
 
-		headerLeft := fmt.Sprintf("Every %.1fs: %s",
-			w.Interval.Truncate(time.Second/10).Seconds(),
-			strings.Join(cmdArgs, " "),
-		)
-		headerRight := time.Now().Format(timeFormat)
-		if hostname != "" {
-			headerRight = fmt.Sprintf("%s: %s", hostname, headerRight)
-		}
-		x := width - len(headerLeft)
-		if x < 0 {
-			x = 0
-		}
-		fmt.Fprintf(&buf, "%s%*s\n\n", headerLeft, x, headerRight)
+		delta := 0
 
-		r, w, err := os.Pipe()
+		if !w.NoTitle {
+			delta = 3
+			headerLeft := fmt.Sprintf("Every %.1fs: %s",
+				w.Interval.Truncate(time.Second/10).Seconds(),
+				strings.Join(cmdArgs, " "),
+			)
+			headerRight := time.Now().Format(w.TimeFormat)
+			if hostname != "" {
+				headerRight = fmt.Sprintf("%s: %s", hostname, headerRight)
+			}
+			x := width - len(headerLeft)
+			if x < 0 {
+				x = 0
+			}
+			fmt.Fprintf(&buf, "%s%*s\n\n", headerLeft, x, headerRight)
+		}
+
+		pr, pw, err := os.Pipe()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "pipe error: %v\n", err)
 			return
 		}
 		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		cmd.Stdout = w
-		cmd.Stderr = w
+		if !w.Exec {
+			cmd = exec.Command("/bin/sh", "-c", strings.Join(cmdArgs, " "))
+		}
+		cmd.Stdout = pw
+		cmd.Stderr = pw
 
 		if err := cmd.Start(); err != nil {
-			w.Close()
-			r.Close()
+			pw.Close()
+			pr.Close()
 			fmt.Fprintf(os.Stderr, "start error: %v\n", err)
 			return
 		}
-		w.Close()
+		pw.Close()
 
-		scanner := bufio.NewScanner(r)
-		for i := 0; i < height-3 && scanner.Scan(); i++ {
+		scanner := bufio.NewScanner(pr)
+		for i := 0; i < height-delta && scanner.Scan(); i++ {
 			line := scanner.Bytes()
 			if len(line) > 0 {
 				if len(line) > width {
@@ -124,7 +149,7 @@ func (w Watcher) Watch(cmdArgs ...string) {
 				break
 			}
 		}
-		r.Close()
+		pr.Close()
 		cmd.Wait()
 
 		os.Stdout.Write(buf.Bytes())
