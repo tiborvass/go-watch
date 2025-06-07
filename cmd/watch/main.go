@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tiborvass/go-watch"
@@ -22,6 +26,13 @@ func main() {
 	}
 	cmdArgs := flag.Args()
 
-	w := watch.Watcher{Interval: interval, NoTitle: *t, Exec: *x}
-	w.Watch(cmdArgs...)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	w := watch.Watcher{Interval: interval, NoTitle: *t}
+	if *x {
+		w.Watch(ctx, cmdArgs...)
+	} else {
+		w.WatchShell(ctx, strings.Join(cmdArgs, " "))
+	}
 }

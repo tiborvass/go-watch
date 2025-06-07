@@ -1,8 +1,16 @@
+// Package watch is a library implementing features of the UNIX watch command.
+//
+// Example:
+//
+//	w := watcher.Watcher{Interval: 500 * time.Millisecond}
+//	w.Watch(ctx, "date", "-Ins")
+//	w.WatchShell(ctx, "date -Ins")
 package watch
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -30,8 +38,6 @@ type Watcher struct {
 	Interval time.Duration
 	// If NoTitle is set, no title header is displayed
 	NoTitle bool
-	// If Exec is set, the commands are executed without an `sh -c` wrapper.
-	Exec bool
 	// Hostname is the hostname displayed in the header.
 	// If nil, it is set to os.Hostname()
 	Hostname *string
@@ -40,8 +46,13 @@ type Watcher struct {
 	TimeFormat string
 }
 
+// Watch executes sh -c shellCmd in a loop honoring the options defined in Watcher.
+func (w Watcher) WatchShell(ctx context.Context, shellCmd string) {
+	w.Watch(ctx, "/bin/sh", "-c", shellCmd)
+}
+
 // Watch executes the commands passed in cmdArgs in a loop honoring the options defined in Watcher.
-func (w Watcher) Watch(cmdArgs ...string) {
+func (w Watcher) Watch(ctx context.Context, cmdArgs ...string) {
 	if w.Interval == 0 {
 		w.Interval = DefaultInterval
 	}
@@ -76,8 +87,8 @@ func (w Watcher) Watch(cmdArgs ...string) {
 	// ensure we restore both on exit
 	defer fmt.Print("\x1b[?25h\x1b[?1049l")
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
+	sigwinch := make(chan os.Signal, 1)
+	signal.Notify(sigwinch, syscall.SIGWINCH)
 
 	ticker := time.NewTicker(w.Interval)
 	defer ticker.Stop()
@@ -116,10 +127,7 @@ func (w Watcher) Watch(cmdArgs ...string) {
 			fmt.Fprintf(os.Stderr, "pipe error: %v\n", err)
 			return
 		}
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-		if !w.Exec {
-			cmd = exec.Command("/bin/sh", "-c", strings.Join(cmdArgs, " "))
-		}
+		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
 		cmd.Stdout = pw
 		cmd.Stderr = pw
 
@@ -159,13 +167,10 @@ func (w Watcher) Watch(cmdArgs ...string) {
 
 	for {
 		select {
-		case sig := <-sigs:
-			switch sig {
-			case syscall.SIGINT, syscall.SIGTERM:
-				return
-			case syscall.SIGWINCH:
-				redraw()
-			}
+		case <-ctx.Done():
+			return
+		case <-sigwinch:
+			redraw()
 		case <-ticker.C:
 			redraw()
 		}
