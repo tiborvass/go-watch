@@ -14,13 +14,13 @@
 ## Direct exec
 
 ```go
-w := watcher.Watcher{Interval: 500 * time.Millisecond}
+w := watch.Watcher{Interval: 500 * time.Millisecond}
 w.Watch(ctx, "date", "-Ins")
 ```
 
 ## Wrapped in sh -c
 
 ```go
-w := watcher.Watcher{Interval: 500 * time.Millisecond}
+w := watch.Watcher{Interval: 500 * time.Millisecond}
 w.WatchShell(ctx, "date -Ins")
 ```
