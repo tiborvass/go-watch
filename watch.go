@@ -2,6 +2,8 @@
 //
 // Example:
 //
+//	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+//	defer stop()
 //	w := watch.Watcher{Interval: 500 * time.Millisecond}
 //	w.Watch(ctx, "date", "-Ins")
 //	w.WatchShell(ctx, "date -Ins")
